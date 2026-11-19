@@ -1,0 +1,25 @@
+{
+  "models": {
+    "chat": "qwen3:4b",
+    "embedding": "bge-m3"
+  },
+  "context": 8192,
+  "embedding_dimensions": 1024,
+  "embedding_seconds": 0.078,
+  "warmup_4096_seconds": 6.484,
+  "gpu_after_4096": "4754 MiB, 3203 MiB",
+  "generation_8192_seconds": 4.969,
+  "retrieval_score": 0.60991,
+  "answer": {
+    "answer": "RAII（Resource Acquisition Is Initialization）通过将资源的生命周期与对象的生命周期紧密绑定，确保在异常发生时能够自动释放资源，从而避免资源泄漏。具体机制如下：当使用 RAII 管理资源时，构造函数负责获取资源（例如内存、文件句柄等），而析构函数则在对象生命周期结束时自动释放该资源。当程序执行过程中发生异常时，由于异常处理机制会触发栈展开（stack unwinding），此时已构造但未完成的 RAII 对象仍会执行其析构函数，从而确保资源被正确释放。例如，std::unique_ptr 是 C++ 标准库中提供独占所有权的智能指针，其析构函数会自动释放所指向的对象，因此在异常处理过程中，即使抛出异常，std::unique 也能够保证资源不会泄漏。[S1]。",
+    "citation_ids": [
+      1
+    ],
+    "insufficient_evidence": false
+  },
+  "generated_tokens": 208,
+  "validation_passed": true,
+  "generation_tokens_per_second": 63.74,
+  "gpu_after_generation": "NVIDIA GeForce RTX 4060 Laptop GPU, 8188 MiB, 5524 MiB, 2433 MiB, 610.74",
+  "scope": "One authored public RAII sample; runtime/format smoke, not the frozen-set quality evaluation."
+}

@@ -1,0 +1,41 @@
+{
+  "status": "passed",
+  "model_mode": "ollama",
+  "generation_model": "qwen3:4b",
+  "embedding_model": "bge-m3",
+  "database": "real PostgreSQL+pgvector",
+  "redis": "fakeredis TCP test double",
+  "case": "one short document and one answerable question",
+  "quality_acceptance": "Not evaluated: this smoke does not establish Hit@5/answer accuracy targets.",
+  "ingestion_seconds": 1.065,
+  "answer_seconds": 5.051,
+  "result": {
+    "answer": "RAII（Resource Acquisition Is Initialization）通过将资源的获取与对象的初始化绑定，确保在异常发生时能够自动释放资源。具体来说，RAII机制要求在对象构造时获取资源（例如内存、文件句柄等），并在对象析构时释放这些资源。当程序执行过程中发生异常时，异常处理机制会触发栈展开（stack unwinding），此时所有在异常发生点之后构造的对象都会被依次析构，从而保证已获取的资源被正确释放。例如，当一个栈上对象在构造过程中抛出异常时，该对象的析和析构函数会被自动调用，确保资源被释放，避免资源泄漏。[S1]。",
+    "citations": [
+      {
+        "chunk_index": 0,
+        "document_id": "52c6de44-3f1c-4404-8d95-2923f075e2ed",
+        "document_name": "real-raii.md",
+        "excerpt": "# RAII\n\nRAII把资源生命周期绑定到对象生命周期。构造函数获取资源，析构函数释放资源。栈上对象在正常离开作用域和异常栈展开时都会调用析构函数，因此资源会自动清理。",
+        "score": 0.65966
+      }
+    ],
+    "insufficient_evidence": false,
+    "model_mode": "ollama",
+    "retrieval": [
+      {
+        "chunk_index": 0,
+        "document_id": "52c6de44-3f1c-4404-8d95-2923f075e2ed",
+        "document_name": "real-raii.md",
+        "excerpt": "# RAII\n\nRAII把资源生命周期绑定到对象生命周期。构造函数获取资源，析构函数释放资源。栈上对象在正常离开作用域和异常栈展开时都会调用析构函数，因此资源会自动清理。",
+        "score": 0.65966
+      }
+    ],
+    "timings": {
+      "embedding_ms": 1814.767,
+      "generation_ms": 2408.186,
+      "retrieval_ms": 27.254,
+      "total_ms": 4250.207
+    }
+  }
+}

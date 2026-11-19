@@ -1,0 +1,35 @@
+name: build-and-test
+on: [push, pull_request]
+jobs:
+  cpp-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S backend -B build -DDOCQA_CORE_ONLY=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+      - run: cmake --build build -j 2
+      - run: ctest --test-dir build --output-on-failure
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r worker/requirements-dev.txt
+      - run: python -m pytest worker/tests -q
+      - run: python scripts/validate_learning.py
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python scripts/init_env.py
+      - run: pip install httpx
+      - run: docker compose up --build -d --wait
+      - run: python scripts/smoke_test.py
+      - if: always()
+        run: docker compose logs --tail=80
+      - if: always()
+        run: docker compose down

@@ -1,0 +1,61 @@
+"""Record retrieval hits and model outputs. Correctness/citation support require human scoring."""
+import argparse,asyncio,json,time
+from pathlib import Path
+import httpx
+from smoke_test import ROOT,local_env
+
+async def evaluate(args):
+    env=local_env();key=env.get('API_KEY');assert key,'Generate .env first'
+    rows=[json.loads(line) for line in (ROOT/'learning/eval/questions.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]
+    selected=[row for row in rows if row['split']==args.split]
+    headers={'X-API-Key':key};records=[]
+    async with httpx.AsyncClient(base_url=env.get('DOCQA_URL','http://127.0.0.1:8080'),timeout=10,trust_env=False) as client:
+        async def baseline(question):
+            if not args.baseline:return None
+            async with httpx.AsyncClient(timeout=110,trust_env=False) as model:
+                response=await model.post(args.ollama_url+'/api/chat',json={
+                  'model':env.get('CHAT_MODEL','qwen3:4b'),'stream':False,'think':False,
+                  'options':{'temperature':0,'num_ctx':8192,'num_predict':768},
+                  'messages':[{'role':'system','content':'用中文回答开发技术问题；不知道时明确说明。'},
+                              {'role':'user','content':question}]})
+                response.raise_for_status();return response.json()['message']['content']
+        async def poll(job_id):
+            for _ in range(135):
+                response=await client.get('/v1/jobs/'+job_id,headers=headers);response.raise_for_status();body=response.json()
+                if body['status']=='succeeded':return body['result']
+                if body['status']=='failed':raise RuntimeError(body['error'])
+                await asyncio.sleep(1)
+            raise RuntimeError('task polling exceeded 135s')
+        if args.ingest:
+            for path in sorted((ROOT/'learning/corpus').glob('*.md')):
+                response=await client.post('/v1/documents',headers=headers,files={'file':(path.name,path.read_bytes(),'text/markdown')})
+                response.raise_for_status();await poll(response.json()['job_id'])
+        for index,row in enumerate(selected):
+            start=time.perf_counter();result=None;error=None
+            for attempt in range(13):
+                response=await client.post('/v1/questions',headers=headers,json={'question':row['question']})
+                if response.status_code==429:
+                    await asyncio.sleep(5);continue
+                if response.status_code!=202:error=f'HTTP {response.status_code}';break
+                try:result=await poll(response.json()['job_id'])
+                except RuntimeError as failure:error=str(failure)
+                break
+            if result is None and error is None:error='rate limit did not reset within65s'
+            retrieved={s['document_name'] for s in (result or {}).get('retrieval',[])}
+            expected=set(row['expected_document_names'])
+            baseline_answer=await baseline(row['question']) if result and result['model_mode']=='ollama' else None
+            records.append({**row,'result':result,'baseline_answer':baseline_answer,'baseline_correct':None,'error':error,'elapsed_seconds':round(time.perf_counter()-start,3),
+              'hit_at_5':expected.issubset(retrieved) if expected and not error else None,
+              'answer_correct':None,'citation_supported':None,'review_notes':''})
+            print(f'{index+1}/{len(selected)} {row["id"]} '+('recorded' if not error else error),flush=True)
+    modes=sorted({r['result']['model_mode'] for r in records if r['result']})
+    report={'split':args.split,'model_modes':modes,'fixture':'original educational corpus; not a public benchmark',
+      'automatic_scoring':'Hit@5 only; answer/citation correctness left for human review','records':records}
+    args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+    print('Saved '+str(args.output)+'. Mock answers cannot establish actual model accuracy.')
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--split',choices=['dev','test'],default='dev');parser.add_argument('--ingest',action='store_true')
+    parser.add_argument('--baseline',action='store_true',help='Also ask the same local Ollama model without retrieved evidence')
+    parser.add_argument('--ollama-url',default='http://127.0.0.1:11434')
+    parser.add_argument('--output',type=Path,default=ROOT/'reports/generated/evaluation.json');asyncio.run(evaluate(parser.parse_args()))

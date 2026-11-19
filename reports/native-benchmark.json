@@ -1,0 +1,57 @@
+{
+  "model_mode": "mock",
+  "measurement": "single-run admission and task completion; not actual LLM throughput",
+  "phases": [
+    {
+      "concurrent_clients": 1,
+      "submitted": 1,
+      "http_status_counts": {
+        "202": 1
+      },
+      "admission_p50_ms": 3.08,
+      "admission_p95_ms": 3.08,
+      "accepted": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "wall_seconds": 0.444,
+      "successful_task_rate_per_second": 2.253
+    },
+    {
+      "concurrent_clients": 10,
+      "submitted": 10,
+      "http_status_counts": {
+        "202": 5,
+        "503": 5
+      },
+      "admission_p50_ms": 17.238,
+      "admission_p95_ms": 19.965,
+      "accepted": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "wall_seconds": 1.706,
+      "successful_task_rate_per_second": 2.931
+    },
+    {
+      "concurrent_clients": 50,
+      "submitted": 50,
+      "http_status_counts": {
+        "202": 5,
+        "503": 45
+      },
+      "admission_p50_ms": 66.947,
+      "admission_p95_ms": 105.526,
+      "accepted": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "wall_seconds": 1.778,
+      "successful_task_rate_per_second": 2.812
+    }
+  ],
+  "environment": "native Windows C++ binary; real PostgreSQL/pgvector; Redis TCP test double",
+  "configured_limits": {
+    "AI_CONCURRENCY": 1,
+    "QUEUE_CAPACITY": 4,
+    "RATE_LIMIT_PER_MINUTE": 6000,
+    "MOCK_DELAY_SECONDS": 0.3
+  }
+}
