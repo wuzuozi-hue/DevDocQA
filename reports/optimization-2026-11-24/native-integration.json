@@ -1,0 +1,19 @@
+{
+  "cpp_backend": "real C++17 Drogon server",
+  "database": "real PostgreSQL with pgvector",
+  "redis": "fakeredis TCP server with Lua (test double, not real Redis)",
+  "model": "mock, fixed generation delay 0.3s",
+  "checks": [
+    "health,auth,validation,empty-library,not-found",
+    "ingestion,duplicate,scoped-answer,valid-citations",
+    "exact-cache,collection-version-invalidation",
+    "parallel-admission,bounded-queue",
+    "redis-unavailable-fail-closed",
+    "measured-mock-load-1-10-50-clients",
+    "fixed-window-rate-limit",
+    "total-deadline-includes-queue",
+    "backend-restart,both-queues-recovered,persistent-document-state"
+  ],
+  "status": "passed",
+  "queue_capacity_test_override": 4
+}

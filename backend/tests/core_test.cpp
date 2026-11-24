@@ -33,6 +33,11 @@ int main() {
     auto config = docqa::Config::read(reader);
     check(config.port == 8080 && config.concurrency == 1 && config.queueCapacity == 16 && config.timeout == 120, "stable defaults");
     env["QUEUE_CAPACITY"] = "0"; check(docqa::Config::read(reader).queueCapacity == 0, "zero waiting allowed");
+    check(config.ingestConcurrency == 1 && config.ingestQueueCapacity == 4, "ingestion defaults");
+    env["INGEST_CONCURRENCY"] = "2"; env["INGEST_QUEUE_CAPACITY"] = "0";
+    auto isolated = docqa::Config::read(reader);
+    check(isolated.concurrency == 1 && isolated.ingestConcurrency == 2 &&
+          isolated.ingestQueueCapacity == 0, "independent ingestion capacity");
     for (const auto& bad : {"-1", "1x", "999999999999999999999999"}) {
       env["DOCQA_PORT"] = bad; rejected = false;
       try { docqa::Config::read(reader); } catch (const std::invalid_argument&) { rejected = true; }

@@ -3,9 +3,10 @@
 Requires a prebuilt backend, its DLL directory, and a disposable migrated PostgreSQL DB.
 No processes or ports are left running. This is not the production Docker acceptance run.
 """
-import argparse, asyncio, json, os, secrets, subprocess, sys, tempfile, threading, time
+import argparse, asyncio, hashlib, json, os, secrets, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 import httpx
+import psycopg
 from fakeredis import TcpFakeServer
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -64,7 +65,11 @@ async def check(args):
                 assert body['status']==expected,body;return body
               await asyncio.sleep(.1)
             raise AssertionError('job did not complete')
-          assert (await client.get('/health')).status_code==200
+          health=await client.get('/health');assert health.status_code==200
+          counts=health.json()
+          assert set(counts['scheduler'])=={'question','ingest'}
+          assert counts['active_jobs']==sum(queue['active'] for queue in counts['scheduler'].values())
+          assert counts['queued_jobs']==sum(queue['queued'] for queue in counts['scheduler'].values())
           assert (await client.get('/v1/documents')).status_code==401
           assert (await call('GET','/v1/jobs/not-found')).status_code==404
           assert (await call('POST','/v1/questions',json={'question':''})).status_code==400
@@ -116,9 +121,31 @@ async def check(args):
                 if body['status'] in ('failed','succeeded'):states.append(body['status']);break
                 await asyncio.sleep(.1)
           assert 'failed' in states,states;checks.append('total-deadline-includes-queue')
-          stop(backend);backend=start_backend();await wait_ready(client)
+          stop(backend)
+          # Seed the disposable DB with both queued kinds before booting, so both
+          # tasks must use the recovery path instead of the HTTP submission path.
+          suffix=secrets.token_hex(8)
+          recovery_doc=f'recovery_{suffix}'
+          recovery_question=f'question_{suffix}'
+          recovery_ingest=f'ingest_{suffix}'
+          recovery_file=tempdir/'documents'/f'{recovery_doc}.md'
+          recovery_file.write_bytes('# 重启恢复\n\n这段原文用于验证重新入库。'.encode())
+          digest=hashlib.sha256(recovery_file.read_bytes()).hexdigest()
+          with psycopg.connect(args.pg_dsn) as connection:
+            connection.execute("INSERT INTO documents(id,name,sha256,status) VALUES(%s,%s,%s,'queued')",
+                               (recovery_doc, recovery_file.name, digest))
+            connection.execute("INSERT INTO jobs(id,kind,status,payload) VALUES(%s,'ingest','queued',%s::jsonb)",
+                               (recovery_ingest, json.dumps({'document_id':recovery_doc,'path':str(recovery_file),
+                                                            'name':recovery_file.name,'sha256':digest})))
+            connection.execute("INSERT INTO jobs(id,kind,status,payload) VALUES(%s,'question','queued',%s::jsonb)",
+                               (recovery_question, json.dumps(question)))
+          backend=start_backend();await wait_ready(client)
+          recovered_question,recovered_ingest=await asyncio.gather(poll(recovery_question),poll(recovery_ingest))
+          assert recovered_question['result']['model_mode']=='mock'
+          assert recovered_ingest['result']['chunks_count']>0
           recovery=await call('GET','/v1/documents');assert recovery.status_code==200
-          checks.append('backend-restart,persistent-document-state')
+          assert any(row['id']==recovery_doc and row['status']=='ready' for row in recovery.json()['documents'])
+          checks.append('backend-restart,both-queues-recovered,persistent-document-state')
         report={'cpp_backend':'real C++17 Drogon server','database':'real PostgreSQL with pgvector',
           'redis':'fakeredis TCP server with Lua (test double, not real Redis)','model':'mock, fixed generation delay 0.3s',
           'checks':checks,'status':'passed','queue_capacity_test_override':4}

@@ -74,7 +74,7 @@ inline std::string cacheMaterial(std::string_view question,
   std::sort(ids.begin(), ids.end());
   ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
   std::string out;
-  frame(out, "docqa-cache-v1"); frame(out, question); frame(out, version); frame(out, model);
+  frame(out, "docqa-cache-v2"); frame(out, question); frame(out, version); frame(out, model);
   frame(out, std::to_string(ids.size()));
   for (const auto& id : ids) frame(out, id);
   return out;
@@ -93,6 +93,7 @@ inline int number(const std::string& value, const std::string& name, int min, in
 struct Config {
   std::string pgDsn, redisHost, apiKey, internalKey, workerUrl, dataDir, modelSignature, embeddingSignature;
   int redisPort{6379}, port{8080}, concurrency{1}, queueCapacity{16}, timeout{120}, rate{10}, cacheTtl{600};
+  int ingestConcurrency{1}, ingestQueueCapacity{4};
   using Reader = std::function<std::string(const std::string&)>;
   static std::string environment(const std::string& name) {
     const auto* p = std::getenv(name.c_str()); return p ? std::string(p) : std::string();
@@ -117,6 +118,8 @@ struct Config {
     c.port = number(get("DOCQA_PORT", "8080"), "DOCQA_PORT", 1, 65535);
     c.concurrency = number(get("AI_CONCURRENCY", "1"), "AI_CONCURRENCY", 1, 64);
     c.queueCapacity = number(get("QUEUE_CAPACITY", "16"), "QUEUE_CAPACITY", 0, 10000);
+    c.ingestConcurrency = number(get("INGEST_CONCURRENCY", "1"), "INGEST_CONCURRENCY", 1, 64);
+    c.ingestQueueCapacity = number(get("INGEST_QUEUE_CAPACITY", "4"), "INGEST_QUEUE_CAPACITY", 0, 10000);
     c.timeout = number(get("JOB_TIMEOUT_SECONDS", "120"), "JOB_TIMEOUT_SECONDS", 1, 3600);
     c.rate = number(get("RATE_LIMIT_PER_MINUTE", "10"), "RATE_LIMIT_PER_MINUTE", 1, 1000000);
     c.cacheTtl = number(get("CACHE_TTL_SECONDS", "600"), "CACHE_TTL_SECONDS", 1, 86400);

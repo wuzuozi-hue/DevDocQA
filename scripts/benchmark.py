@@ -41,14 +41,96 @@ async def run_benchmark(client,headers,document_ids,clients=(1,10,50)):
           'wall_seconds':round(duration,3),'successful_task_rate_per_second':round(completed.count('succeeded')/duration,3)})
     return {'model_mode':'mock','measurement':'single-run admission and task completion; not actual LLM throughput','phases':phases}
 
+async def run_mixed_benchmark(client, headers, rounds=5):
+    async def upload(name, content):
+        response = await client.post('/v1/documents', headers=headers,
+                                     files={'file': (name, content.encode(), 'text/markdown')})
+        response.raise_for_status()
+        return response.json()
+
+    async def get_job(job_id):
+        response = await client.get(f'/v1/jobs/{job_id}', headers=headers)
+        response.raise_for_status()
+        return response.json()
+
+    async def wait_job(job_id):
+        deadline = time.monotonic() + 135
+        while time.monotonic() < deadline:
+            job = await get_job(job_id)
+            if job['status'] in ('succeeded', 'failed'):
+                return job
+            await asyncio.sleep(.025)
+        raise RuntimeError('mixed workload job did not complete')
+
+    trial_id = uuid.uuid4().hex
+    seed = await upload(f'raii-{trial_id}.md',
+        f'# RAII\n\nRAII 在对象析构时释放锁和文件句柄。试验编号 {trial_id}。')
+    if (await wait_job(seed['job_id']))['status'] != 'succeeded':
+        raise RuntimeError('benchmark seed document did not become ready')
+
+    trials = []
+    all_question_ms = []
+    for index in range(rounds):
+        batch_start = time.perf_counter()
+        uploads = []
+        for n in range(6):
+            uploads.append(await upload(f'mixed-{trial_id}-{index}-{n}.md',
+                                        f'# 文档入库负载\n\n试验 {trial_id}，第 {index} 组的第 {n} 篇文档。'))
+        upload_ids = [document['job_id'] for document in uploads]
+        statuses = await asyncio.gather(*(get_job(job_id) for job_id in upload_ids))
+        active_ingests = sum(job['status'] == 'running' for job in statuses)
+        queued_ingests = sum(job['status'] == 'queued' for job in statuses)
+
+        async def ask(question_index):
+            tick = time.perf_counter()
+            response = await client.post('/v1/questions', headers=headers, json={
+                'question': f'RAII 何时释放文件句柄？测试 {trial_id}-{index}-{question_index}',
+                'document_ids': [seed['document_id']],
+            })
+            if response.status_code != 202:
+                return {'http_status': response.status_code, 'status': 'rejected'}
+            job = await wait_job(response.json()['job_id'])
+            if job['status'] == 'succeeded' and job['result']['model_mode'] != 'mock':
+                raise RuntimeError('This load test is restricted to mock model mode.')
+            return {'http_status': 202, 'status': job['status'], 'error': job['error'],
+                    'completion_ms': round((time.perf_counter() - tick) * 1000, 3)}
+
+        async def finish_ingests():
+            jobs = await asyncio.gather(*(wait_job(job_id) for job_id in upload_ids))
+            return {'succeeded': sum(job['status'] == 'succeeded' for job in jobs),
+                    'seconds': round(time.perf_counter() - batch_start, 3)}
+
+        ingest, questions = await asyncio.gather(finish_ingests(), asyncio.gather(ask(0), ask(1)))
+        all_question_ms.extend(question['completion_ms'] for question in questions
+                               if question['status'] == 'succeeded')
+        trials.append({'active_ingests_at_submission': active_ingests,
+                       'queued_ingests_at_submission': queued_ingests,
+                       'ingest': ingest, 'questions': questions})
+
+    upload_count = sum(trial['ingest']['succeeded'] for trial in trials)
+    upload_seconds = sum(trial['ingest']['seconds'] for trial in trials)
+    return {'model_mode': 'mock', 'rounds': rounds, 'uploads_per_round': 6, 'questions_per_round': 2,
+            'successful_questions': len(all_question_ms),
+            'question_completion_p50_ms': round(statistics.median(all_question_ms), 3) if all_question_ms else None,
+            'question_completion_p95_ms': round(statistics.quantiles(all_question_ms, n=100, method='inclusive')[94], 3) if len(all_question_ms) > 1 else None,
+            'successful_ingests': upload_count,
+            'ingest_throughput_per_second': round(upload_count / upload_seconds, 3),
+            'trials': trials}
+
 async def main(args):
     env=local_env();key=env.get('API_KEY');assert key,'Generate .env first'
     async with httpx.AsyncClient(base_url=env.get('DOCQA_URL','http://127.0.0.1:8080'),timeout=10,trust_env=False) as client:
-        report=await run_benchmark(client,{'X-API-Key':key},args.document_ids)
-    report['configured_limits']={name:env.get(name,'default') for name in ['AI_CONCURRENCY','QUEUE_CAPACITY','RATE_LIMIT_PER_MINUTE']}
+        headers={'X-API-Key':key}
+        if args.mixed:
+            report=await run_mixed_benchmark(client,headers)
+        else:
+            report=await run_benchmark(client,headers,args.document_ids)
+    report['configured_limits']={name:env.get(name,'default') for name in
+        ['AI_CONCURRENCY','QUEUE_CAPACITY','INGEST_CONCURRENCY','INGEST_QUEUE_CAPACITY','RATE_LIMIT_PER_MINUTE']}
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print('Benchmark saved to '+str(args.output)+'. Review rejected requests and configured limits before interpreting throughput.')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--document-ids',nargs='*',default=[])
+    parser.add_argument('--mixed', action='store_true', help='Compare question latency during document ingestion in mock mode')
     parser.add_argument('--output',type=Path,default=ROOT/'reports/generated/benchmark.json');asyncio.run(main(parser.parse_args()))

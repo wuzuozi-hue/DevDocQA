@@ -110,6 +110,7 @@ async def generate_answer(payload: AnswerRequest, store, provider):
         answer=answer_text,
         citations=[citations[identifier - 1] for identifier in used_ids],
         retrieval=citations,
+        evidence_trace=generation.evidence_trace,
         insufficient_evidence=generation.insufficient_evidence,
         model_mode=provider.mode,
         timings={"embedding_ms": round((after_embedding-start)*1000, 3),

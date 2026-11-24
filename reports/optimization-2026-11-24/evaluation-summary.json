@@ -1,0 +1,443 @@
+{
+  "fixture": "DevDocQA educational corpus (30 Markdown documents), development 20, test 40",
+  "runtime": {
+    "embedding": "BGE-M3",
+    "generation": "Qwen3 4B via local Ollama",
+    "database": "PostgreSQL with pgvector",
+    "redis": "fakeredis TCP test double"
+  },
+  "review": "Codex checked reference answers and final cited excerpts. No independent reviewer.",
+  "scope": "Development and test are different splits. The full test run predates the recovery reservation fix; the final build passed a separate real-model smoke test.",
+  "development": {
+    "completed": 18,
+    "failed": 2,
+    "total": 20
+  },
+  "test": {
+    "completed": 35,
+    "failed": 5,
+    "total": 40,
+    "correct_over_all": 20,
+    "unanswerable_marked": 6,
+    "unanswerable_properly_declined": 5,
+    "unanswerable_total": 7,
+    "hit_at_5": {
+      "passed": 27,
+      "eligible": 28
+    },
+    "prompt_document_hit": {
+      "passed": 27,
+      "eligible": 28
+    },
+    "answer_correct": {
+      "passed": 20,
+      "eligible": 35
+    },
+    "citation_supported": {
+      "passed": 15,
+      "eligible": 28
+    }
+  },
+  "test_records": [
+    {
+      "id": "Q015",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "四种状态码均正确，S1 覆盖其含义。"
+    },
+    {
+      "id": "Q016",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "交代了持久化、轮询和重启后 queued/running 的区别。"
+    },
+    {
+      "id": "Q017",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "重试的主要建议正确，但把无限重试描述为可能绕过现有限流，引用不支持此因果。"
+    },
+    {
+      "id": "Q018",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "解释了同一事务的原子性及外部调用为何不应放入长事务。"
+    },
+    {
+      "id": "Q019",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": false,
+      "prompt_document_hit": false,
+      "answer_correct": false,
+      "citation_supported": true,
+      "review_notes": "谈到了条件更新和生命周期，但遗漏具体状态条件及受影响行数。已有核心判断可由所引片段支持。"
+    },
+    {
+      "id": "Q020",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "给出复合或部分索引，说明应测执行计划、实际延迟与扫描行数。"
+    },
+    {
+      "id": "Q021",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "覆盖空库、已有库升级和重复启动；回答有重复。"
+    },
+    {
+      "id": "Q022",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "只重复问题并添加引用，没有解释五种结构。"
+    },
+    {
+      "id": "Q023",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "正确识别 INCR/EXPIRE 间隙，但误称旧窗口的计数会计入下个窗口。"
+    },
+    {
+      "id": "Q024",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "缓存键构成和 10 分钟 TTL 与 S1 一致。"
+    },
+    {
+      "id": "Q025",
+      "category": "direct",
+      "error": "worker_failed",
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": null,
+      "citation_supported": null,
+      "review_notes": "任务失败，无回答可评。"
+    },
+    {
+      "id": "Q026",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": false,
+      "review_notes": "核心分块解释正确，但 100 和 1000 字符阈值未获引文支持。"
+    },
+    {
+      "id": "Q027",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "说明兼容性条件以及换模型或维度后重建向量。"
+    },
+    {
+      "id": "Q028",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "说明候选噪声、上下文、延迟和多文档覆盖问题。"
+    },
+    {
+      "id": "Q029",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "给出引用的三个字段并区分引用存在与支持事实。"
+    },
+    {
+      "id": "Q030",
+      "category": "direct",
+      "error": "worker_failed",
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": null,
+      "citation_supported": null,
+      "review_notes": "任务失败，无回答可评。"
+    },
+    {
+      "id": "Q031",
+      "category": "direct",
+      "error": "worker_failed",
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": null,
+      "citation_supported": null,
+      "review_notes": "任务失败，无回答可评。"
+    },
+    {
+      "id": "Q032",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "区分 size 与容量，说明扩容和删除的失效条件。"
+    },
+    {
+      "id": "Q033",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "正确指出跨字段不变量不自动成立，但把独立原子操作的组合不一致直接说成数据竞争和未定义行为。"
+    },
+    {
+      "id": "Q034",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "先说设置关闭标志再通知，后又要求通知后才设置标志，结论自相矛盾。"
+    },
+    {
+      "id": "Q035",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "只重复问题并添加引用，未给出处理方式。"
+    },
+    {
+      "id": "Q036",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "只重复问题，没有说明索引的存储和写入成本。"
+    },
+    {
+      "id": "Q037",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "正确区分固定和滑动窗口，但示例把相邻秒误作为不同窗口，给出错误计数。"
+    },
+    {
+      "id": "Q038",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "给出了教学分块参数，但把字符数解释成字节长度。"
+    },
+    {
+      "id": "Q039",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "正确把文档中的指令当作不可信资料处理。"
+    },
+    {
+      "id": "Q040",
+      "category": "direct",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "说明测试集参与调参后必须另取未使用集合。"
+    },
+    {
+      "id": "Q044",
+      "category": "multi_document",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "重复题目并附双引用，未给出两类保护。"
+    },
+    {
+      "id": "Q045",
+      "category": "multi_document",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": false,
+      "review_notes": "TCP 与重试建议正确。最终只保留 TCP 原文，另一个编号写成 [2]，重试建议缺少对应的有效引用。"
+    },
+    {
+      "id": "Q046",
+      "category": "multi_document",
+      "error": "worker_failed",
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": null,
+      "citation_supported": null,
+      "review_notes": "任务失败，无回答可评。"
+    },
+    {
+      "id": "Q047",
+      "category": "multi_document",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": true,
+      "citation_supported": true,
+      "review_notes": "给出正常返回、提前返回和异常三条路径，结合日志检查一次释放。"
+    },
+    {
+      "id": "Q048",
+      "category": "multi_document",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": true,
+      "review_notes": "上传路径安全解释正确，主要论述有来源；漏答引用可追溯所需的片段编号和原文。"
+    },
+    {
+      "id": "Q049",
+      "category": "multi_document",
+      "error": null,
+      "hit_at_5": true,
+      "prompt_document_hit": true,
+      "answer_correct": false,
+      "citation_supported": false,
+      "review_notes": "把语义支持与文档级 Hit@5 合并为同一个命中条件。"
+    },
+    {
+      "id": "Q050",
+      "category": "multi_document",
+      "error": "worker_failed",
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": null,
+      "citation_supported": null,
+      "review_notes": "任务失败，无回答可评。"
+    },
+    {
+      "id": "Q054",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": false,
+      "citation_supported": null,
+      "review_notes": "重复题目并附引用，没有表达资料不足，标志也为 false。"
+    },
+    {
+      "id": "Q055",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": true,
+      "citation_supported": null,
+      "review_notes": "明确承认教学证据不含本次实验的向量维度。"
+    },
+    {
+      "id": "Q056",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": true,
+      "citation_supported": null,
+      "review_notes": "说明无法从材料得到实际 API Key。"
+    },
+    {
+      "id": "Q057",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": true,
+      "citation_supported": null,
+      "review_notes": "明确说无法从给定材料确定显卡型号。"
+    },
+    {
+      "id": "Q058",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": true,
+      "citation_supported": null,
+      "review_notes": "明确表示技术语料不含招聘日薪。"
+    },
+    {
+      "id": "Q059",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": true,
+      "citation_supported": null,
+      "review_notes": "明确表示语料无法确认实时 PostgreSQL 最新版本。"
+    },
+    {
+      "id": "Q060",
+      "category": "unanswerable",
+      "error": null,
+      "hit_at_5": null,
+      "prompt_document_hit": null,
+      "answer_correct": false,
+      "citation_supported": null,
+      "review_notes": "虽然 insufficient_evidence 为 true，但最终答复只重复了问题。"
+    }
+  ]
+}

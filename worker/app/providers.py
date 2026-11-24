@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .errors import WorkerError
-from .models import Citation, Generation
+from .models import Citation, EvidenceTrace, Generation
 
 EMBEDDING_DIMENSION = 1024
 MOCK_MIN_SIMILARITY = 0.10
@@ -167,6 +167,16 @@ class OllamaProvider:
             raise WorkerError(502, "invalid_model_citation", "The model cited evidence outside its prompt.")
         if re.fullmatch(r"[\s.…]+", generation.answer):
             raise WorkerError(502, "invalid_model_response", "The model returned placeholder text instead of an answer.")
+        # prepare_messages drops a suffix and keeps the original source numbering.
+        omitted = list(range(evidence_count + 1, len(citations) + 1))
+        generation._evidence_trace = EvidenceTrace(
+            included_source_ids=list(range(1, evidence_count + 1)),
+            omitted_source_ids=omitted,
+            omitted_reason="prompt_byte_budget" if omitted else None,
+            prompt_bytes=sum(len(message["content"].encode("utf-8")) for message in messages),
+            byte_budget=PROMPT_BYTE_BUDGET,
+            model_citation_ids=generation.citation_ids,
+        )
         return generation
 
 

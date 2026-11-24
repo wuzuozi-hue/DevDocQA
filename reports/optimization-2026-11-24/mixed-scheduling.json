@@ -1,0 +1,265 @@
+{
+  "environment": "Native Windows C++17 Clang Release, PostgreSQL/pgvector, fakeredis TCP; synthetic delays of 800 ms/ingest and 150 ms/generation.",
+  "controls": "Both have 2 total workers and 16 total wait slots. Baseline shares all; optimized assigns 1 worker and 8 wait slots per job kind.",
+  "baseline_source": "46f9a2ab93bc94c4e0f00b87571f57fb25333650 with only the filename validation build typo removed",
+  "baseline": {
+    "model_mode": "mock",
+    "rounds": 5,
+    "uploads_per_round": 6,
+    "questions_per_round": 2,
+    "successful_questions": 10,
+    "question_completion_p50_ms": 2770.874,
+    "question_completion_p95_ms": 2783.893,
+    "successful_ingests": 30,
+    "ingest_throughput_per_second": 2.292,
+    "trials": [
+      {
+        "active_ingests_at_submission": 2,
+        "queued_ingests_at_submission": 4,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 2.643
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2771.292
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2770.456
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 2,
+        "queued_ingests_at_submission": 4,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 2.592
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2781.503
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2752.426
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 2,
+        "queued_ingests_at_submission": 4,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 2.618
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2718.184
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2785.848
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 2,
+        "queued_ingests_at_submission": 4,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 2.623
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2748.057
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2747.159
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 2,
+        "queued_ingests_at_submission": 4,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 2.613
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2773.035
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 2772.239
+          }
+        ]
+      }
+    ],
+    "configured_limits": {
+      "AI_CONCURRENCY": "2",
+      "QUEUE_CAPACITY": "16",
+      "INGEST_CONCURRENCY": "1",
+      "INGEST_QUEUE_CAPACITY": "8",
+      "RATE_LIMIT_PER_MINUTE": "6000"
+    }
+  },
+  "optimized": {
+    "model_mode": "mock",
+    "rounds": 5,
+    "uploads_per_round": 6,
+    "questions_per_round": 2,
+    "successful_questions": 10,
+    "question_completion_p50_ms": 304.486,
+    "question_completion_p95_ms": 405.142,
+    "successful_ingests": 30,
+    "ingest_throughput_per_second": 1.184,
+    "trials": [
+      {
+        "active_ingests_at_submission": 1,
+        "queued_ingests_at_submission": 5,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 5.11
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 232.269
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 408.465
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 1,
+        "queued_ingests_at_submission": 5,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 5.08
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 222.535
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 401.081
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 1,
+        "queued_ingests_at_submission": 5,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 5.036
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 191.943
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 397.108
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 1,
+        "queued_ingests_at_submission": 5,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 5.048
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 190.22
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 376.704
+          }
+        ]
+      },
+      {
+        "active_ingests_at_submission": 1,
+        "queued_ingests_at_submission": 5,
+        "ingest": {
+          "succeeded": 6,
+          "seconds": 5.054
+        },
+        "questions": [
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 209.51
+          },
+          {
+            "http_status": 202,
+            "status": "succeeded",
+            "error": "",
+            "completion_ms": 380.038
+          }
+        ]
+      }
+    ],
+    "configured_limits": {
+      "AI_CONCURRENCY": "1",
+      "QUEUE_CAPACITY": "8",
+      "INGEST_CONCURRENCY": "1",
+      "INGEST_QUEUE_CAPACITY": "8",
+      "RATE_LIMIT_PER_MINUTE": "6000"
+    }
+  }
+}

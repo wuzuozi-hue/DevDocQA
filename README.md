@@ -93,7 +93,9 @@ python scripts/validate_learning.py
 
 问答结果包含答案、实际使用的引用、检索候选、模型模式和分阶段耗时。问题最多 4000 UTF-8 字节，文档 ID 最多 200 个；空文档集合默认使用所有已就绪文档。状态为 `queued → running → succeeded/failed`。
 
-主要配置在 `.env.example`：并发 1、等待容量 16、总时限 120 秒、每 Key 每分钟 10 个问题、缓存 600 秒。队列满 `503`，限流 `429`，输入问题 `400/413/415`，资料未就绪/向量不兼容 `409`。Redis 故障时新问答失败关闭，已运行任务继续完成。
+主要配置在 `.env.example`。问答默认并发 1、等待容量 16，文档入库默认并发 1、等待容量 4，分别通过 `AI_CONCURRENCY` / `QUEUE_CAPACITY` 和 `INGEST_CONCURRENCY` / `INGEST_QUEUE_CAPACITY` 调整。`GET /health` 的 `scheduler.question` 和 `scheduler.ingest` 分别显示运行、排队及已预留名额。总时限 120 秒，每 Key 每分钟 10 个问题，缓存 600 秒。对应队列满返回 `503`，限流返回 `429`，输入问题返回 `400/413/415`，资料未就绪或向量不兼容返回 `409`。Redis 故障时新问答失败关闭，已运行任务继续完成。
+
+真实模型问答的任务结果包含 `evidence_trace`，记录实际送入模型和被预算裁掉的来源编号，以及模型原始声明的引用编号。[优化清单](docs/optimization-log.md)
 
 ## 评测与项目范围
 

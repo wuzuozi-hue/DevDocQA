@@ -110,7 +110,7 @@ Upload readUpload(const Request& request) {
     return error(400, "invalid_upload", "Upload exactly one multipart field named file");
   const auto& file = parser.getFiles().front(); upload.name = file.getFileName();
   if (upload.name.empty() || upload.name.size() > 255 || !validUtf8(upload.name) ||
-disk_      upload.name.find_first_of("/\\\r\n") != std::string::npos || upload.name.find('\0') != std::string::npos)
+      upload.name.find_first_of("/\\\r\n") != std::string::npos || upload.name.find('\0') != std::string::npos)
     return error(400, "invalid_filename", "Use a simple UTF-8 filename");
   const auto dot = upload.name.find_last_of('.');
   upload.extension = dot == std::string::npos ? "" : upload.name.substr(dot);
@@ -134,7 +134,10 @@ bool equalSecret(const std::string& value, const std::string& secret) {
 class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
  public:
   explicit Impl(Config config)
-      : config_(std::move(config)), slots_(config_.concurrency, config_.queueCapacity), loop_(drogon::app().getLoop()) {
+      : config_(std::move(config)),
+        questions_("question", config_.concurrency, config_.queueCapacity),
+        ingestions_("ingest", config_.ingestConcurrency, config_.ingestQueueCapacity),
+        loop_(drogon::app().getLoop()) {
     config_.dataDir = std::filesystem::absolute(config_.dataDir).lexically_normal().string();
     std::filesystem::create_directories(config_.dataDir);
   }
@@ -167,8 +170,14 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
         //body的类型是json.cppgai
         body["ready"] = self->ready_;
         body["service"] = "devdocqa";
-        body["active_jobs"] = static_cast<Json::UInt64>(self->active_);
-        body["queued_jobs"] = static_cast<Json::UInt64>(self->queue_.size());
+        body["active_jobs"] = static_cast<Json::UInt64>(self->questions_.active + self->ingestions_.active);
+        body["queued_jobs"] = static_cast<Json::UInt64>(self->questions_.jobs.size() + self->ingestions_.jobs.size());
+        for (const auto* queue : {&self->questions_, &self->ingestions_}) {
+          auto& counts = body["scheduler"][queue->kind];
+          counts["active"] = static_cast<Json::UInt64>(queue->active);
+          counts["queued"] = static_cast<Json::UInt64>(queue->jobs.size());
+          counts["reserved"] = static_cast<Json::UInt64>(queue->slots.used());
+        }
         reply.send(200, body);
       });
     }, {drogon::Get});
@@ -221,6 +230,22 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
     unsigned persistFailures{0};
   };
   using JobPtr = std::shared_ptr<Job>;
+
+  struct JobQueue {
+    JobQueue(std::string name, std::size_t workers, std::size_t waiting)
+        : kind(std::move(name)), concurrency(workers), slots(workers, waiting) {}
+
+    std::string kind;
+    std::size_t concurrency;
+    Capacity slots;
+    std::deque<JobPtr> jobs;
+    std::size_t active{0};
+    bool refilling{false};
+  };
+
+  JobQueue& queueFor(const Job& task) {
+    return task.kind == "ingest" ? ingestions_ : questions_;
+  }
 
   bool authorized(const Request& request, const Reply& reply) {
     if (!equalSecret(request->getHeader("X-API-Key"), config_.apiKey)) {
@@ -301,14 +326,14 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
   }
 
   void upload(const Request& request, const Reply& reply) {
-    if (!slots_.reserve()) { reply.error(503, "queue_full", "Task capacity is full; retry later"); return; }
+    if (!ingestions_.slots.reserve()) { reply.error(503, "queue_full", "Ingestion capacity is full; retry later"); return; }
     auto self = shared_from_this();
     disk_.add([self, request, reply] {
       Upload upload;
       try { upload = readUpload(request); }
       catch (...) { upload.errorStatus = 500; upload.errorCode = "upload_failed"; upload.errorMessage = "Could not process upload"; }
       self->post([self, reply, upload = std::move(upload)]() mutable {
-        if (upload.errorStatus) { self->slots_.release(); reply.error(upload.errorStatus, upload.errorCode, upload.errorMessage); return; }
+        if (upload.errorStatus) { self->ingestions_.slots.release(); reply.error(upload.errorStatus, upload.errorCode, upload.errorMessage); return; }
         if (!self->uploadDigests_.insert(upload.digest).second) {
           // Same-content requests share the first durable ingestion submission.
           // Their reservations bound the number of waiting HTTP callbacks.
@@ -323,7 +348,7 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
     auto it = duplicateWaiters_.find(digest);
     if (it == duplicateWaiters_.end()) return;
     for (const auto& reply : it->second) {
-      slots_.release();
+      ingestions_.slots.release();
       if (body) { auto duplicate = *body; duplicate["duplicate"] = true; reply.send(202, duplicate); }
       else reply.error(503, "upload_failed", "The shared upload failed; retry later");
     }
@@ -331,7 +356,7 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
   }
 
   void releaseUpload(const std::shared_ptr<Upload>& upload, const Json::Value* body = nullptr) {
-    uploadDigests_.erase(upload->digest); slots_.release(); notifyDuplicates(upload->digest, body);
+    uploadDigests_.erase(upload->digest); ingestions_.slots.release(); notifyDuplicates(upload->digest, body);
   }
 
   void lookupUpload(const std::shared_ptr<Upload>& upload, const Reply& reply) {
@@ -378,7 +403,7 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
         auto completed = [self, upload, reply, documentId, task](const Result& result) {
           self->pendingIds_.erase(task->id);
           self->uploadDigests_.erase(upload->digest);
-          if (result.empty()) { self->slots_.release(); self->notifyDuplicates(upload->digest); reply.error(409, "document_changed", "Document state changed; retry"); return; }
+          if (result.empty()) { self->ingestions_.slots.release(); self->notifyDuplicates(upload->digest); reply.error(409, "document_changed", "Document state changed; retry"); return; }
           self->enqueue(task); Json::Value body; body["document_id"] = documentId; body["job_id"] = task->id;
           body["duplicate"] = false; self->notifyDuplicates(upload->digest, &body); reply.send(202, body);
         };
@@ -470,7 +495,7 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
 
   void submitQuestion(const Reply& reply, const std::string& question, const Json::Value& ids,
                       const std::string& cacheKey, const Json::Value& cached) {
-    if (!slots_.reserve()) { reply.error(503, "queue_full", "Task capacity is full; retry later"); return; }
+    if (!questions_.slots.reserve()) { reply.error(503, "queue_full", "Question capacity is full; retry later"); return; }
     auto self = shared_from_this(); auto task = std::make_shared<Job>();
     task->id = uuid(); task->kind = "question"; task->cacheKey = cacheKey;
     task->payload["job_id"] = task->id; task->payload["question"] = question; task->payload["document_ids"] = ids;
@@ -483,31 +508,32 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
     pendingIds_.insert(task->id);
     auto done = [self, reply, task, hit](const Result&) {
       self->pendingIds_.erase(task->id);
-      if (hit) self->slots_.release(); else self->enqueue(task);
+      if (hit) self->questions_.slots.release(); else self->enqueue(task);
       Json::Value body; body["job_id"] = task->id; body["cached"] = hit; reply.send(202, body);
     };
-    auto fail = [self, reply, task] { self->pendingIds_.erase(task->id); self->slots_.release(); self->unavailable(reply); };
+    auto fail = [self, reply, task] { self->pendingIds_.erase(task->id); self->questions_.slots.release(); self->unavailable(reply); };
     if (hit) sql(statement, done, fail, task->id, compact(task->payload), compact(cached));
     else sql(statement, done, fail, task->id, compact(task->payload));
   }
 
   void enqueue(const JobPtr& task) {
+    auto& queue = queueFor(*task);
     if (loaded_.count(task->id)) {
-      slots_.release(); LOG_WARN << "Duplicate scheduler admission suppressed job=" << task->id; return;
+      queue.slots.release(); LOG_WARN << "Duplicate scheduler admission suppressed job=" << task->id; return;
     }
-    loaded_.insert(task->id); queue_.push_back(task);
+    loaded_.insert(task->id); queue.jobs.push_back(task);
     const auto delay = std::max(0.001, std::chrono::duration<double>(task->deadline - Clock::now()).count());
     auto self = shared_from_this(); loop_->runAfter(delay, [self, task] {
       if (self->loaded_.count(task->id) && !task->finishing) self->finish(task, {}, "job_timeout");
     });
-    pump();
+    pump(queue);
   }
 
-  void pump() {
-    while (active_ < static_cast<std::size_t>(config_.concurrency) && !queue_.empty()) {
-      auto task = queue_.front(); queue_.pop_front();
+  void pump(JobQueue& queue) {
+    while (queue.active < queue.concurrency && !queue.jobs.empty()) {
+      auto task = queue.jobs.front(); queue.jobs.pop_front();
       if (task->finishing) continue;
-      task->running = true; ++active_;
+      task->running = true; ++queue.active;
       if (Clock::now() >= task->deadline) finish(task, {}, "job_timeout"); else run(task);
     }
   }
@@ -561,7 +587,8 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
   void finish(const JobPtr& task, const Json::Value& result, const std::string& error) {
     if (task->finishing) return;
     task->finishing = true;
-    if (!task->running) queue_.erase(std::remove(queue_.begin(), queue_.end(), task), queue_.end());
+    auto& jobs = queueFor(*task).jobs;
+    if (!task->running) jobs.erase(std::remove(jobs.begin(), jobs.end(), task), jobs.end());
     persistFinish(task, result, error);
   }
 
@@ -574,9 +601,10 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
         self->redis_->execCommandAsync([](const drogon::nosql::RedisResult&) {}, [](const std::exception&) {},
           "SET %s %b EX %d", task->cacheKey.c_str(), encoded.data(), encoded.size(), self->config_.cacheTtl);
       }
-      if (task->running) --self->active_;
-      self->loaded_.erase(task->id); self->slots_.release();
-      self->pump(); self->refill();
+      auto& queue = self->queueFor(*task);
+      if (task->running) --queue.active;
+      self->loaded_.erase(task->id); queue.slots.release();
+      self->pump(queue); self->refill(queue);
     };
     auto fail = [self, task, result, error] {
 
@@ -611,24 +639,30 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
   }
 
   void refill() {
-    if (refilling_ || !slots_.available()) return;
-    refilling_ = true;
-    const auto limit = slots_.available();
-    for (std::size_t i = 0; i < limit; ++i) slots_.reserve();
+    refill(questions_);
+    refill(ingestions_);
+  }
+
+  void refill(JobQueue& queue) {
+    if (queue.refilling || !queue.slots.available()) return;
+    queue.refilling = true;
+    const auto limit = queue.slots.available();
     Json::Value excluded(Json::arrayValue); for (const auto& id : loaded_) excluded.append(id);
     for (const auto& id : pendingIds_) excluded.append(id);
     auto self = shared_from_this();
-    sql("SELECT id,kind,payload::text,EXTRACT(EPOCH FROM(now()-created_at)) AS age FROM jobs WHERE status='queued' "
+    sql("SELECT id,kind,payload::text,EXTRACT(EPOCH FROM(now()-created_at)) AS age FROM jobs WHERE status='queued' AND kind=$3 "
         "AND id NOT IN (SELECT jsonb_array_elements_text($1::jsonb)) ORDER BY created_at,id LIMIT $2::integer",
-      [self, limit](const Result& rows) {
-        self->refilling_ = false;
-        for (std::size_t i = rows.size(); i < limit; ++i) self->slots_.release();
+      [self, &queue](const Result& rows) {
+        queue.refilling = false;
         for (const auto& row : rows) {
           const auto id = row["id"].as<std::string>();
           // A submission may acquire its ID after the recovery SELECT was
           // issued. Recheck current state on this serialized loop, not just the
           // excluded-ID snapshot used to construct that SELECT.
-          if (self->loaded_.count(id) || self->pendingIds_.count(id)) { self->slots_.release(); continue; }
+          if (self->loaded_.count(id) || self->pendingIds_.count(id)) continue;
+          // Submissions may fill slots while the SELECT is in flight. Reserve
+          // only for rows we can enqueue; the rest stay durably queued.
+          if (!queue.slots.reserve()) break;
           auto task = std::make_shared<Job>(); task->id = id; task->kind = row["kind"].as<std::string>();
           task->payload = parse(row["payload"].as<std::string>());
           if (task->payload.isObject() && task->payload["cache_key"].isString()) task->cacheKey = task->payload["cache_key"].asString();
@@ -636,18 +670,18 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
           task->deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(remaining));
           self->enqueue(task);
         }
-      }, [self, limit] {
-        self->refilling_ = false; for (std::size_t i = 0; i < limit; ++i) self->slots_.release();
-        self->loop_->runAfter(2, [self] { self->refill(); });
-      }, compact(excluded), static_cast<int>(limit));
+      }, [self, &queue] {
+        queue.refilling = false;
+        self->loop_->runAfter(2, [self, &queue] { self->refill(queue); });
+      }, compact(excluded), static_cast<int>(limit), queue.kind);
   }
 
-  Config config_; Capacity slots_; trantor::EventLoop* loop_;
+  Config config_; JobQueue questions_, ingestions_; trantor::EventLoop* loop_;
   std::shared_ptr<drogon::orm::DbClient> db_;
   std::shared_ptr<drogon::nosql::RedisClient> redis_;
   DiskExecutor disk_;
-  bool ready_{false}, refilling_{false}; std::size_t active_{0};
-  std::deque<JobPtr> queue_; std::set<std::string> loaded_, uploadDigests_, pendingIds_;
+  bool ready_{false};
+  std::set<std::string> loaded_, uploadDigests_, pendingIds_;
   std::map<std::string, std::vector<Reply>> duplicateWaiters_;
 };
 

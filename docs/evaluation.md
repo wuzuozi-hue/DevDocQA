@@ -22,7 +22,7 @@ python scripts/evaluate.py --split dev --ingest
 python scripts/evaluate.py --split dev --ingest --baseline
 ```
 
-脚本逐题等待任务；遇到 429 会等待限流窗口，不绕过默认限制。结果写到忽略的 `reports/generated/evaluation.json`。`retrieval` 是完整候选前5个，`citations` 是回答实际使用来源，不能混用这两个字段计算 Hit@5。
+脚本逐题等待任务，遇到 429 会等待限流窗口。使用 `--ingest` 时，逐题把文档范围限定为本次语料。每题写一次检查点，结果默认保存在 `reports/generated/evaluation.json`。`retrieval` 用于计算前 5 个候选的文档命中，`evidence_trace` 用于计算入模文档命中，`citations` 用于人工检查最终引用是否支持回答。缺少追踪时，入模文档命中保持未知。执行失败的题单独计数。
 
 调参仅使用 dev20。模型、分块与检索参数冻结后，再明确执行 `--split test --baseline`，并用独立 `--output` 路径保存，不能覆盖开发集结果。
 
@@ -47,5 +47,7 @@ python scripts/benchmark.py --document-ids 已就绪文档ID
 ```
 
 记录1/10/50并发客户端的提交延迟、HTTP拒绝状态、成功/失败任务及完成耗时。429和503是容量控制结果，不计为成功吞吐。CPU/内存由操作系统监控另行记录，不能凭请求延迟推算。
+
+同一模拟环境下可运行 `python scripts/benchmark.py --mixed --output reports/generated/mixed.json`。脚本每组先提交 6 个文档，再同时提交 2 个问答，记录问答完成时间、问答提交时的入库状态和入库吞吐。对照共享调度和隔离调度时，固定两个版本的总执行名额、总等待容量和 Worker 延迟。若提交问答时入库已处理完，该组只代表无入库竞争的负载。
 
 本次原生测量文件是 `reports/native-benchmark.json`，报告标明其并发/队列/限流覆盖值、Redis测试替身和模型固定延迟。后端原生构建使用未优化标志，不能据此宣称生产性能或优化收益。

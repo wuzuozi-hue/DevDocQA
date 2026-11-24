@@ -40,6 +40,12 @@ async def run():
         if isinstance(result,str):result=json.loads(result)
         assert result['answer'] and result['citations'],result
         assert all(c['document_id']==document['document_id'] for c in result['citations'])
+        if result['model_mode']=='ollama':
+            trace=result['evidence_trace']
+            assert trace['included_source_ids']==[1] and trace['omitted_source_ids']==[]
+            assert {c['source_id'] for c in result['citations']} <= set(trace['model_citation_ids'])
+            assert 0 < trace['prompt_bytes'] <= trace['byte_budget']
         missing=await client.get('/v1/jobs/does-not-exist',headers=headers);assert missing.status_code==404
-        print('Public API smoke test passed: health/auth/validation/ingestion/answer/citations/not-found.')
+        print('Public API smoke test passed: health/auth/validation/ingestion/answer/citations/not-found.'
+              + (' Real-model evidence trace checked.' if result['model_mode']=='ollama' else ''))
 if __name__=='__main__':asyncio.run(run())
