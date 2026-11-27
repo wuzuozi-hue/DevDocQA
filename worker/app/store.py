@@ -10,12 +10,25 @@ from .models import Citation
 from .providers import EMBEDDING_DIMENSION, embedding_signature
 
 logger = logging.getLogger(__name__)
+ADJACENT_CHUNK_EXISTS = (
+    "EXISTS(SELECT 1 FROM chunks a WHERE a.document_id=c.document_id "
+    "AND a.embedding_signature=c.embedding_signature "
+    "AND a.chunk_index IN (c.chunk_index-1,c.chunk_index+1)) AS has_adjacent"
+)
 
 
 def vector_literal(vector: list[float]) -> str:
     if len(vector) != EMBEDDING_DIMENSION or not all(math.isfinite(v) for v in vector):
         raise WorkerError(502, "invalid_embedding", "Invalid embedding vector.")
     return "[" + ",".join(format(v, ".9g") for v in vector) + "]"
+
+
+def citation_from_record(row) -> Citation:
+    citation = Citation(document_id=row["document_id"], document_name=row["document_name"],
+                        chunk_index=row["chunk_index"], excerpt=row["content"],
+                        score=round(float(row.get("score", 0.0)), 6))
+    citation._has_adjacent = row.get("has_adjacent", False)
+    return citation
 
 
 class PgChunkStore:
@@ -57,9 +70,10 @@ class PgChunkStore:
             logger.warning("Database ingestion failed (%s)", type(error).__name__)
             raise WorkerError(503, "database_unavailable", "Document storage is unavailable.") from None
 
-    async def search(self, embedding: list[float], document_ids: list[str]) -> list[Citation]:
+    async def search(self, embedding: list[float], document_ids: list[str], *, include_adjacent=False) -> list[Citation]:
         query_vector = vector_literal(embedding)
         filter_sql = " AND d.id = ANY(%s::text[])" if document_ids else ""
+        adjacent_sql = ", " + ADJACENT_CHUNK_EXISTS if include_adjacent else ""
         try:
             async with await self._connect() as connection:
                 # Check signatures and retrieve from one snapshot. Switching between
@@ -74,8 +88,8 @@ class PgChunkStore:
                     raise WorkerError(409, "embedding_mismatch", "Selected documents use a different embedding model. Re-upload them in the current model mode.")
                 cursor = await connection.execute(
                     "SELECT d.id AS document_id,d.name AS document_name,c.chunk_index,c.content,"
-                    "1 - (c.embedding <=> %s::vector) AS score "
-                    "FROM chunks c JOIN documents d ON d.id=c.document_id "
+                    "1 - (c.embedding <=> %s::vector) AS score" + adjacent_sql +
+                    " FROM chunks c JOIN documents d ON d.id=c.document_id "
                     "WHERE d.status='ready' AND c.embedding_signature=%s" + filter_sql +
                     " ORDER BY c.embedding <=> %s::vector,c.document_id,c.chunk_index LIMIT 5",
                     # The filter appears before ORDER BY; match the SQL placeholder order.
@@ -85,8 +99,23 @@ class PgChunkStore:
         except psycopg.Error as error:
             logger.warning("Database retrieval failed (%s)", type(error).__name__)
             raise WorkerError(503, "database_unavailable", "Document storage is unavailable.") from None
-        return [Citation(
-            document_id=row["document_id"], document_name=row["document_name"],
-            chunk_index=row["chunk_index"], excerpt=row["content"],
-            score=round(float(row["score"]), 6),
-        ) for row in records]
+        return [citation_from_record(row) for row in records]
+
+    async def read_section(self, source: Citation) -> list[Citation]:
+        """Read adjacent chunks of a server-resolved anchor from the same document."""
+        try:
+            async with await self._connect() as connection:
+                cursor = await connection.execute(
+                    "SELECT d.id AS document_id,d.name AS document_name,c.chunk_index,c.content, " + ADJACENT_CHUNK_EXISTS +
+                    " FROM chunks c JOIN documents d ON d.id=c.document_id "
+                    "WHERE d.id=%s AND d.status='ready' AND d.embedding_signature=%s "
+                    "AND c.embedding_signature=%s AND c.chunk_index BETWEEN %s AND %s AND c.chunk_index<>%s "
+                    "ORDER BY c.chunk_index",
+                    (source.document_id, self.embedding_signature, self.embedding_signature,
+                     source.chunk_index - 1, source.chunk_index + 1, source.chunk_index),
+                )
+                records = await cursor.fetchall()
+        except psycopg.Error as error:
+            logger.warning("Database section read failed (%s)", type(error).__name__)
+            raise WorkerError(503, "database_unavailable", "Document storage is unavailable.") from None
+        return [citation_from_record(row) for row in records]

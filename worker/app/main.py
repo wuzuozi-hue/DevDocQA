@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import logging
 import re
@@ -8,11 +9,12 @@ from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .agent import AGENT_TIMEOUT_SECONDS, collect_evidence
 from .cancellation import while_connected
 from .chunking import chunk_text, read_document
 from .config import Settings, get_settings
 from .errors import WorkerError
-from .models import AnswerRequest, AnswerResponse, IngestRequest, IngestResponse
+from .models import AnswerRequest, AnswerResponse, Generation, IngestRequest, IngestResponse
 from .providers import get_provider
 from .store import PgChunkStore
 
@@ -76,7 +78,13 @@ async def ingest(
 
 @app.post("/internal/answer", response_model=AnswerResponse, dependencies=[Depends(require_internal_key)])
 async def answer(payload: AnswerRequest, request: Request, store=Depends(store_dependency), provider=Depends(provider_dependency)):
-    return await while_connected(request, generate_answer(payload, store, provider))
+    if payload.strategy != "agent":
+        return await while_connected(request, generate_answer(payload, store, provider))
+    try:
+        async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
+            return await while_connected(request, generate_answer(payload, store, provider))
+    except TimeoutError:
+        raise WorkerError(504, "agent_timeout", "The document agent exceeded its execution budget.") from None
 
 
 async def generate_answer(payload: AnswerRequest, store, provider):
@@ -84,12 +92,25 @@ async def generate_answer(payload: AnswerRequest, store, provider):
     if not question:
         raise WorkerError(422, "empty_question", "Question must contain non-whitespace characters.")
     start = perf_counter()
-    embeddings = await provider.embed([question])
-    after_embedding = perf_counter()
-    retrieved = await store.search(embeddings[0], list(dict.fromkeys(payload.document_ids)))
+    document_ids = list(dict.fromkeys(payload.document_ids))
+    agent_trace = None
+    if payload.strategy == "agent":
+        retrieved, agent_trace = await collect_evidence(question, document_ids, store, provider)
+        timings = {"agent_planning_ms": round((perf_counter() - start) * 1000, 3)}
+    else:
+        embeddings = await provider.embed([question])
+        after_embedding = perf_counter()
+        retrieved = await store.search(embeddings[0], document_ids)
+        timings = {"embedding_ms": round((after_embedding - start) * 1000, 3),
+                   "retrieval_ms": round((perf_counter() - after_embedding) * 1000, 3)}
     citations = [citation.model_copy(update={"source_id": index}) for index, citation in enumerate(retrieved, 1)]
     after_search = perf_counter()
-    generation = await provider.generate(question, citations)
+    if agent_trace and not citations:
+        reason = ("排障步骤已用完，现有资料不足以回答。"
+                  if agent_trace.stop_reason == "step_limit" else "资料不足，无法给出有依据的回答。")
+        generation = Generation(answer=reason, citation_ids=[], insufficient_evidence=True)
+    else:
+        generation = await provider.generate(question, citations)
     used_ids = list(dict.fromkeys(generation.citation_ids))
     answer_text = generation.answer
     inline_ids = {int(value) for value in re.findall(r"\[S(\d+)\]", answer_text)}
@@ -113,8 +134,8 @@ async def generate_answer(payload: AnswerRequest, store, provider):
         evidence_trace=generation.evidence_trace,
         insufficient_evidence=generation.insufficient_evidence,
         model_mode=provider.mode,
-        timings={"embedding_ms": round((after_embedding-start)*1000, 3),
-                 "retrieval_ms": round((after_search-after_embedding)*1000, 3),
-                 "generation_ms": round((elapsed-after_search)*1000, 3),
+        strategy=payload.strategy,
+        agent_trace=agent_trace,
+        timings={**timings, "generation_ms": round((elapsed-after_search)*1000, 3),
                  "total_ms": round((elapsed-start)*1000, 3)},
     )

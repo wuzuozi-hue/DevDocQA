@@ -3,15 +3,19 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DevDocQA · 开发文档问答</title>
 <style>
 :root{color-scheme:dark;--bg:#11151c;--panel:#1a202b;--line:#30394a;--text:#e9edf6;--muted:#9ba8be;--accent:#86d6b0}*{box-sizing:border-box}body{margin:0;font:15px/1.6 system-ui,sans-serif;background:var(--bg);color:var(--text)}main{max-width:1150px;margin:40px auto;padding:0 24px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}h1{margin:0;font-size:32px;letter-spacing:-1px}h2{font-size:18px;margin:0 0 16px}p{margin:8px 0}.muted{color:var(--muted)}.badge{padding:5px 12px;border:1px solid var(--line);border-radius:30px;font-size:12px}.grid{display:grid;grid-template-columns:350px 1fr;gap:20px}.card{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:22px;margin-bottom:18px}label{display:block;font-size:13px;color:var(--muted);margin-bottom:7px}input,textarea,button{font:inherit;border-radius:8px}input[type=password],textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:12px}textarea{min-height:130px;resize:vertical}button{cursor:pointer;border:0;background:var(--accent);color:#10271c;font-weight:600;padding:10px 15px;margin-top:12px}button.secondary{background:#2b3545;color:var(--text)}button:disabled{opacity:.45;cursor:wait}.file{max-width:100%;font-size:12px}#documents{list-style:none;padding:0;max-height:300px;overflow:auto}#documents li{border-top:1px solid var(--line);padding:10px 0;overflow-wrap:anywhere}#documents label{color:var(--text);display:flex;gap:8px;align-items:start}#documents small{display:block;color:var(--muted);margin-left:23px}#answer{white-space:pre-wrap;overflow-wrap:anywhere}#status{color:var(--accent);margin-bottom:12px}#notice{min-height:24px;color:#ffc58c;white-space:pre-wrap}blockquote{margin:8px 0 15px;padding:12px;border-left:3px solid var(--accent);background:#11151c;white-space:pre-wrap;font-size:13px}.source-title{font-size:13px;color:var(--accent)}footer{font-size:12px;color:var(--muted);margin:24px 0}#resultMode{margin-bottom:12px;color:var(--muted);font-size:12px}@media(max-width:760px){main{margin-top:22px}.grid{grid-template-columns:1fr}header{align-items:start;gap:12px}h1{font-size:26px}}
+select{width:100%;margin-bottom:14px;padding:8px 12px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;font:inherit}#agentTrace{margin-top:16px;font-size:13px;color:var(--muted)}#agentTrace summary{cursor:pointer;color:var(--text)}#agentTrace ol{padding-left:22px}
 </style></head>
 <body><main>
-<header><div><h1>DevDocQA</h1><p class="muted">开发文档问答 · 每个答案都有可查看的依据</p></div><span class="badge" id="health">正在检查服务</span></header>
+<header><div><h1>DevDocQA</h1><p class="muted">开发文档问答与排障</p></div><span class="badge" id="health">正在检查服务</span></header>
 <div class="grid"><aside>
 <section class="card"><h2>连接服务</h2><label for="apiKey">本地演示 API Key</label><input id="apiKey" type="password" autocomplete="off" placeholder="输入 .env 中的 API_KEY"><button id="connect">连接并加载文档</button><p class="muted" style="font-size:12px">Key 仅保留在当前页面内存中。</p></section>
 <section class="card"><h2>文档库</h2><label for="file">上传 Markdown / TXT · 最大 2MB</label><input class="file" id="file" type="file" accept=".md,.txt"><button id="upload">上传并建立索引</button><button class="secondary" id="refresh">刷新</button><ul id="documents"><li class="muted">连接后显示文档</li></ul><p class="muted" style="font-size:12px">勾选指定文档；未勾选时搜索全部已就绪文档。</p></section>
 </aside><div>
-<section class="card"><h2>向文档提问</h2><label for="question">你想解决什么问题？</label><textarea id="question" maxlength="4000" placeholder="例如：RAII 如何保证发生异常时也能释放资源？"></textarea><button id="ask">提交问题</button><p id="notice" role="alert"></p></section>
-<section class="card" aria-live="polite"><h2>回答与来源</h2><div id="status">等待提问</div><div id="resultMode"></div><div id="answer" class="muted">先上传文档并等待索引完成，再提交问题。</div><div id="citations"></div></section>
+<section class="card"><h2>向文档提问</h2>
+<label for="strategy">回答方式</label><select id="strategy"><option value="rag">普通文档问答</option><option value="agent">文档排障 Agent</option></select>
+<label for="question">你想解决什么问题？</label><textarea id="question" maxlength="4000" placeholder="例如：接口返回 503，怎样区分任务队列满和 Redis 不可用？"></textarea><button id="ask">提交问题</button><p id="notice" role="alert"></p></section>
+<section class="card" aria-live="polite"><h2>回答与来源</h2><div id="status">等待提问</div><div id="resultMode"></div><div id="answer" class="muted">先上传文档并等待索引完成，再提交问题。</div><div id="citations"></div>
+<details id="agentTrace" hidden><summary>查看 Agent 工具轨迹</summary><ol id="agentSteps"></ol><p id="agentStop"></p></details></section>
 </div></div><footer>教学项目 · 默认 Mock 模式用于验证服务链路，其摘录结果不能作为真实模型效果评测。任务提交后在服务器继续执行。</footer>
 </main><script>
 const $=id=>document.getElementById(id);let askBusy=false;
@@ -31,12 +35,40 @@ async function poll(id,onStatus){
  for(let n=0;n<140;n++){const job=await request('/v1/jobs/'+encodeURIComponent(id));onStatus(job.status);if(job.status==='succeeded')return typeof job.result==='string'?JSON.parse(job.result):job.result;if(job.status==='failed')throw new Error(job.error||'任务失败');await new Promise(r=>setTimeout(r,1000))}throw new Error('页面等待已结束；服务端任务仍可用任务 ID 查询。');
 }
 function display(result){
- $('answer').className='';$('answer').textContent=result.answer||'没有返回答案';$('resultMode').textContent=`模式：${result.model_mode||'未标注'}${result.insufficient_evidence?' · 依据不足':''}`;$('citations').replaceChildren();
+ const strategy=result.strategy==='agent'?'文档排障 Agent':'普通文档问答';
+ $('answer').className='';$('answer').textContent=result.answer||'没有返回答案';$('resultMode').textContent=`${strategy} · ${result.model_mode||'未标注'}${result.insufficient_evidence?' · 依据不足':''}`;$('citations').replaceChildren();
  for(const source of result.citations||[]){const title=document.createElement('p'),quote=document.createElement('blockquote');title.className='source-title';title.textContent=`${source.source_id?'[S'+source.source_id+'] ':''}${source.document_name||source.name||source.document_id} · 片段 ${source.chunk_index}`;quote.textContent=source.excerpt||'';$('citations').append(title,quote)}
+ const trace=result.agent_trace;
+ $('agentTrace').hidden=!trace;
+ $('agentSteps').replaceChildren();
+ if(!trace)return;
+ const actions={search_docs:'检索文档',read_section:'读取相邻片段',finish:'选定证据',insufficient_evidence:'判定证据不足'};
+ const outcomes={ok:'完成',empty:'没有找到片段',duplicate:'跳过重复调用',invalid_arguments:'参数无效'};
+ const reasons={finished:'已选定生成答案所需的片段',insufficient_evidence:'证据不足',step_limit:'达到步骤上限'};
+ for(const step of trace.steps){
+   const item=document.createElement('li');
+   item.textContent=`${actions[step.action]} · ${outcomes[step.outcome]} · ${step.duration_ms.toFixed(0)} ms`;
+   $('agentSteps').append(item);
+ }
+ $('agentStop').textContent=reasons[trace.stop_reason];
 }
 $('connect').onclick=async()=>{try{notice('');await refresh();notice('连接成功。')}catch(e){notice(e.message)}};
 $('refresh').onclick=async()=>{try{await refresh()}catch(e){notice(e.message)}};
 $('upload').onclick=async()=>{const file=$('file').files[0];if(!file){notice('请选择文档。');return}if(file.size>2*1024*1024){notice('文档超过 2MB。');return}const form=new FormData();form.append('file',file);$('upload').disabled=true;try{notice('');const result=await request('/v1/documents',{method:'POST',body:form});if(result.job_id)await poll(result.job_id,s=>notice('文档状态：'+s));notice('文档处理完成。');await refresh()}catch(e){notice(e.message)}finally{$('upload').disabled=false}};
-$('ask').onclick=async()=>{if(askBusy)return;const question=$('question').value.trim();if(!question){notice('请输入问题。');return}askBusy=true;$('ask').disabled=true;try{notice('');$('citations').replaceChildren();$('answer').textContent='';$('resultMode').textContent='';const document_ids=[...document.querySelectorAll('#documents input:checked')].map(x=>x.value);const result=await request('/v1/questions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,document_ids})});const answer=await poll(result.job_id,s=>$('status').textContent=`任务 ${result.job_id} · ${s}`);display(answer);$('status').textContent='回答完成'}catch(e){$('status').textContent='请求未完成';notice(e.message)}finally{askBusy=false;$('ask').disabled=false}};
+$('ask').onclick=async()=>{
+ if(askBusy)return;
+ const question=$('question').value.trim();
+ if(!question){notice('请输入问题。');return}
+ askBusy=true;$('ask').disabled=true;
+ try{
+   notice('');$('citations').replaceChildren();$('answer').textContent='';$('resultMode').textContent='';$('agentTrace').hidden=true;
+   const document_ids=[...document.querySelectorAll('#documents input:checked')].map(x=>x.value);
+   const strategy=$('strategy').value;
+   const result=await request('/v1/questions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,document_ids,strategy})});
+   const answer=await poll(result.job_id,s=>$('status').textContent=`任务 ${result.job_id} · ${s}`);
+   display(answer);$('status').textContent=result.cached?'回答完成 · 缓存命中':'回答完成';
+ }catch(e){$('status').textContent='请求未完成';notice(e.message)}
+ finally{askBusy=false;$('ask').disabled=false}
+};
 fetch('/health').then(r=>{if(!r.ok)throw new Error();$('health').textContent='服务在线'}).catch(()=>$('health').textContent='服务未连接');
 </script></body></html>

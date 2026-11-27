@@ -422,6 +422,14 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
     if (text.empty() || text.size() > 4000 || blank(text) || !validUtf8(text) || text.find('\0') != std::string::npos) {
       reply.error(400, "invalid_question", "Question must contain 1–4000 UTF-8 bytes"); return;
     }
+    bool agent = false;
+    if (body.isMember("strategy")) {
+      const auto& strategy = body["strategy"];
+      if (!strategy.isString() || (strategy.asString() != "rag" && strategy.asString() != "agent")) {
+        reply.error(400, "invalid_strategy", "strategy must be rag or agent"); return;
+      }
+      agent = strategy.asString() == "agent";
+    }
     Json::Value requested(Json::arrayValue);
     if (body.isMember("document_ids")) {
       if (!body["document_ids"].isArray() || body["document_ids"].size() > 200) { reply.error(400, "invalid_documents", "document_ids must be an array of at most 200 IDs"); return; }
@@ -439,32 +447,32 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
       for (const auto& id : ids) requested.append(id);
     }
     if (!redis_) { reply.error(503, "redis_unavailable", "Redis is unavailable; new questions are temporarily disabled"); return; }
-    rateLimit(reply, text, requested);
+    rateLimit(reply, text, requested, agent);
   }
 
-  void rateLimit(const Reply& reply, const std::string& question, const Json::Value& requested) {
+  void rateLimit(const Reply& reply, const std::string& question, const Json::Value& requested, bool agent) {
     auto self = shared_from_this();
     const auto minute = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() / 60;
     const auto key = "docqa:rate:" + sha256(config_.apiKey) + ":" + std::to_string(minute);
     // Expiration is installed atomically with the first increment, avoiding
     // immortal counters if the client dies between INCR and EXPIRE.
     const char* script = "local n=redis.call('INCR',KEYS[1]);if n==1 then redis.call('EXPIRE',KEYS[1],120) end;return n";
-    redis_->execCommandAsync([self, reply, question, requested](const drogon::nosql::RedisResult& result) {
+    redis_->execCommandAsync([self, reply, question, requested, agent](const drogon::nosql::RedisResult& result) {
       const auto count = result.asInteger();
-      self->post([self, reply, question, requested, count] {
+      self->post([self, reply, question, requested, agent, count] {
         if (count > self->config_.rate) { reply.error(429, "rate_limited", "Question rate limit reached; retry next minute"); return; }
-        self->resolveDocuments(reply, question, requested);
+        self->resolveDocuments(reply, question, requested, agent);
       });
     }, [self, reply](const std::exception&) {
       self->post([reply] { reply.error(503, "redis_unavailable", "Redis is unavailable; new questions are temporarily disabled"); });
     }, "EVAL %s 1 %s", script, key.c_str());
   }
 
-  void resolveDocuments(const Reply& reply, const std::string& question, const Json::Value& requested) {
+  void resolveDocuments(const Reply& reply, const std::string& question, const Json::Value& requested, bool agent) {
     auto self = shared_from_this();
     sql("SELECT d.id,d.status,d.embedding_signature,s.version::text FROM documents d CROSS JOIN collection_state s WHERE s.id=1 AND "
         "(($1::jsonb='[]'::jsonb AND d.status='ready') OR d.id IN (SELECT jsonb_array_elements_text($1::jsonb))) ORDER BY d.id",
-      [self, reply, question, requested](const Result& rows) {
+      [self, reply, question, requested, agent](const Result& rows) {
         if (rows.empty()) { reply.error(409, "documents_not_ready", "Upload documents and wait until they are ready"); return; }
         if (rows.size() > 200) { reply.error(409, "too_many_documents", "Select at most 200 documents for one question"); return; }
         if (!requested.empty() && rows.size() != requested.size()) { reply.error(409, "documents_not_ready", "One or more requested documents are missing or not ready"); return; }
@@ -476,17 +484,19 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
           }
           const auto id = row["id"].as<std::string>(); ids.append(id); strings.push_back(id);
         }
-        const auto cacheKey = "docqa:answer:" + sha256(cacheMaterial(question, strings, rows[0]["version"].as<std::string>(), self->config_.modelSignature));
-        self->lookupCache(reply, question, ids, cacheKey);
+        const auto prefix = agent ? "docqa:answer:agent-v1:" : "docqa:answer:";
+        const auto cacheKey = prefix + sha256(cacheMaterial(question, strings, rows[0]["version"].as<std::string>(), self->config_.modelSignature));
+        self->lookupCache(reply, question, ids, cacheKey, agent);
       }, [self, reply] { self->unavailable(reply); }, compact(requested));
   }
 
-  void lookupCache(const Reply& reply, const std::string& question, const Json::Value& ids, const std::string& key) {
+  void lookupCache(const Reply& reply, const std::string& question, const Json::Value& ids, const std::string& key,
+                   bool agent) {
     auto self = shared_from_this();
-    redis_->execCommandAsync([self, reply, question, ids, key](const drogon::nosql::RedisResult& result) {
+    redis_->execCommandAsync([self, reply, question, ids, key, agent](const drogon::nosql::RedisResult& result) {
       const auto cached = result.isNil() ? std::string() : result.asString();
-      self->post([self, reply, question, ids, key, cached] {
-        self->submitQuestion(reply, question, ids, key, parse(cached));
+      self->post([self, reply, question, ids, key, cached, agent] {
+        self->submitQuestion(reply, question, ids, key, parse(cached), agent);
       });
     }, [self, reply](const std::exception&) {
       self->post([reply] { reply.error(503, "redis_unavailable", "Redis is unavailable; new questions are temporarily disabled"); });
@@ -494,14 +504,16 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
   }
 
   void submitQuestion(const Reply& reply, const std::string& question, const Json::Value& ids,
-                      const std::string& cacheKey, const Json::Value& cached) {
+                      const std::string& cacheKey, const Json::Value& cached, bool agent) {
     if (!questions_.slots.reserve()) { reply.error(503, "queue_full", "Question capacity is full; retry later"); return; }
     auto self = shared_from_this(); auto task = std::make_shared<Job>();
     task->id = uuid(); task->kind = "question"; task->cacheKey = cacheKey;
     task->payload["job_id"] = task->id; task->payload["question"] = question; task->payload["document_ids"] = ids;
     task->payload["cache_key"] = cacheKey;
+    if (agent) task->payload["strategy"] = "agent";
     task->deadline = Clock::now() + std::chrono::seconds(config_.timeout);
-    const bool hit = cached.isObject() && cached["answer"].isString() && cached["citations"].isArray();
+    const bool hit = cached.isObject() && cached["answer"].isString() && cached["citations"].isArray() &&
+        (!agent || (cached["strategy"] == "agent" && cached["agent_trace"].isObject()));
     const auto statement = hit
       ? "INSERT INTO jobs(id,kind,status,payload,result,started_at,finished_at) VALUES($1,'question','succeeded',$2::jsonb,$3::jsonb,now(),now()) RETURNING id"
       : "INSERT INTO jobs(id,kind,status,payload) VALUES($1,'question','queued',$2::jsonb) RETURNING id";
@@ -566,9 +578,16 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
           if (task->finishing) return;
           if (status == drogon::ReqResult::Timeout || Clock::now() >= task->deadline) { self->finish(task, {}, "job_timeout"); return; }
           if (status != drogon::ReqResult::Ok || !response) { self->finish(task, {}, "worker_unavailable"); return; }
-          if (response->statusCode() != drogon::k200OK) { self->finish(task, {}, "worker_failed"); return; }
-          auto value = parse(std::string(response->body()));
+          const auto value = parse(std::string(response->body()));
+          const bool agent = task->payload.get("strategy", "rag") == "agent";
+          if (response->statusCode() != drogon::k200OK) {
+            const bool budgetExpired = agent && response->statusCode() == drogon::k504GatewayTimeout &&
+                value.isObject() && value["error"].isObject() && value["error"]["code"] == "agent_timeout";
+            self->finish(task, {}, budgetExpired ? "agent_timeout" : "worker_failed"); return;
+          }
           if (!value.isObject() || (task->kind == "question" && (!value["answer"].isString() || !value["citations"].isArray())) ||
+              (agent && (value["strategy"] != "agent" || !value["agent_trace"].isObject() ||
+                         !value["insufficient_evidence"].isBool())) ||
               (task->kind == "ingest" && (!value["chunks_count"].isIntegral() || !value["embedding_signature"].isString()))) {
             self->finish(task, {}, "invalid_worker_response"); return;
           }
@@ -596,7 +615,9 @@ class Server::Impl : public std::enable_shared_from_this<Server::Impl> {
     auto self = shared_from_this();
     auto done = [self, task, result, error](const Result&) {
       LOG_INFO << "job=" << task->id << " kind=" << task->kind << " outcome=" << (error.empty() ? "succeeded" : error);
-      if (error.empty() && task->kind == "question" && !task->cacheKey.empty() && self->redis_) {
+      const bool agentAbstained = result.isObject() && result["strategy"] == "agent" &&
+          result["insufficient_evidence"].asBool();
+      if (error.empty() && task->kind == "question" && !agentAbstained && !task->cacheKey.empty() && self->redis_) {
         const auto encoded = compact(result);
         self->redis_->execCommandAsync([](const drogon::nosql::RedisResult&) {}, [](const std::exception&) {},
           "SET %s %b EX %d", task->cacheKey.c_str(), encoded.data(), encoded.size(), self->config_.cacheTtl);

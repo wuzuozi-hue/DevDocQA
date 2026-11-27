@@ -2,6 +2,8 @@
 
 面向开发文档的检索增强问答服务。C++ / Drogon 提供上传、任务调度和查询接口，Python / FastAPI 负责文档分块、向量检索和模型调用。任务存入 PostgreSQL，Redis 用于限流和缓存。
 
+普通问答执行一次向量检索。文档排障 Agent 可改写搜索词，或读取已找到片段的上下文，再选择证据并作答。两种方式可在页面切换，并用同一批问题做对照评测。[排障 Agent 设计与评测](docs/troubleshooting-agent.md)
+
 ## 已提供的工程能力
 
 - C++17 / Drogon 异步 HTTP、PostgreSQL、Redis；文档上传、持久任务、轮询结果。
@@ -88,7 +90,7 @@ python scripts/validate_learning.py
 |---|---|---|
 | `POST /v1/documents` | multipart `file`，UTF-8 `.md/.txt`，最多 2MiB | `202`，文档 ID、入库任务 ID、重复标记 |
 | `GET /v1/documents` | 无 | 文档列表及状态 |
-| `POST /v1/questions` | JSON `question`、可选 `document_ids` | `202`，任务 ID、缓存命中标记 |
+| `POST /v1/questions` | JSON `question`、可选 `document_ids` 和 `strategy`（`rag` 或 `agent`，默认 `rag`） | `202`，任务 ID、缓存命中标记 |
 | `GET /v1/jobs/{id}` | 任务 ID | 状态、结果、错误和时间 |
 
 问答结果包含答案、实际使用的引用、检索候选、模型模式和分阶段耗时。问题最多 4000 UTF-8 字节，文档 ID 最多 200 个；空文档集合默认使用所有已就绪文档。状态为 `queued → running → succeeded/failed`。

@@ -65,6 +65,23 @@ async def test_exact_search_filters_scope_and_non_ready_documents(database):
     assert {row.document_id for row in all_ready} == set(documents[:2])
 
 
+async def test_section_read_is_limited_to_adjacent_chunks_of_ready_document(database):
+    connection, store, documents, jobs = database
+    for i in range(2):
+        chunks = ["header", "needle", "adjacent", "beyond"]
+        await store.replace_chunks(jobs[i], documents[i], chunks, [mock_embedding(chunk) for chunk in chunks])
+    await connection.execute("UPDATE documents SET status='ready',embedding_signature='mock:featurehash-v1' WHERE id=ANY(%s::text[])",
+                             (documents[:2],))
+    await connection.commit()
+    anchor = (await store.search(mock_embedding("needle"), [documents[0]], include_adjacent=True))[0]
+    assert anchor._has_adjacent
+    adjacent = await store.read_section(anchor)
+    assert [(row.document_id, row.chunk_index) for row in adjacent] == [(documents[0], 0), (documents[0], 2)]
+    await connection.execute("UPDATE documents SET status='failed' WHERE id=%s", (documents[0],))
+    await connection.commit()
+    assert await store.read_section(anchor) == []
+
+
 async def test_late_ingestion_rejected_after_timeout(database):
     connection, store, documents, jobs = database
     await connection.execute("UPDATE jobs SET status='failed' WHERE id=%s", (jobs[0],))
